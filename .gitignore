@@ -1,0 +1,106 @@
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python build files
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# -------------------------
+# Environment Variables
+# -------------------------
+.env
+.env.*
+!.env.example
+
+# -------------------------
+# IDEs
+# -------------------------
+.vscode/
+.idea/
+
+# -------------------------
+# Logs
+# -------------------------
+*.log
+logs/
+
+# -------------------------
+# Databases
+# -------------------------
+*.db
+*.sqlite3
+
+# -------------------------
+# Node.js / Frontend
+# -------------------------
+node_modules/
+frontend/node_modules/
+
+dist/
+build/
+.vite/
+.cache/
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# -------------------------
+# AI Models & Weights
+# -------------------------
+*.pt
+*.pth
+*.safetensors
+*.bin
+*.ckpt
+*.onnx
+*.h5
+
+# Qwen models
+backend/models/qwen2vl/
+
+# YOLO models
+yolov8n.pt
+
+# Uploads
+uploads/
+backend/uploads/
+
+# -------------------------
+# OS Files
+# -------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -------------------------
+# Temporary Files
+# -------------------------
+*~
+*.swp
+*.swo
+*.bak
