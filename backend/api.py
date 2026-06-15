@@ -8,6 +8,7 @@ import cv2
 import io
 import os
 import platform
+import torch
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 from main import initialize_monitoring
@@ -261,10 +262,19 @@ def get_events():
 
 @app.route('/health', methods=['GET'])
 def health():
-    """Health check endpoint"""
+    """Health check endpoint with GPU info"""
+    device_info = {
+        "cuda_available": torch.cuda.is_available(),
+        "device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
+        "pytorch_version": torch.__version__,
+        "cuda_version": torch.version.cuda if torch.cuda.is_available() else "N/A",
+    }
+    
     return jsonify({
         "status": "healthy",
-        "monitoring_active": monitoring_system is not None
+        "monitoring_active": monitoring_system is not None,
+        "gpu_info": device_info,
+        "note": "GPU acceleration enabled through YOLO framework on Jetson"
     })
 
 

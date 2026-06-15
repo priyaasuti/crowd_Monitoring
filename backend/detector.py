@@ -1,5 +1,6 @@
 """
 YOLO-based person detector module
+GPU acceleration is handled automatically by YOLO framework
 """
 import cv2
 import torch
@@ -20,6 +21,7 @@ class PersonDetector:
     def __init__(self, model_path="models/yolov8n.pt"):
         """
         Initialize the YOLO detector
+        GPU acceleration is automatic via YOLO framework
 
         Args:
             model_path: Path to the YOLOv8 model file
@@ -28,6 +30,7 @@ class PersonDetector:
         self.model = None  # Lazy loaded
         self.person_class_id = 0  # Person is class 0 in COCO dataset
         self.conf_threshold = 0.18
+        print(f"PersonDetector initialized", flush=True)
 
     def _load_model(self):
         """Lazy load the YOLO model on first use"""
@@ -36,7 +39,7 @@ class PersonDetector:
             from ultralytics import YOLO
 
             self.model = YOLO(self.model_path)
-            print("YOLO model loaded successfully", flush=True)
+            print("✅ YOLO model loaded successfully", flush=True)
 
     def detect(self, frame):
         """
