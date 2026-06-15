@@ -260,6 +260,32 @@ def get_events():
     })
 
 
+@app.route('/performance', methods=['GET'])
+def get_performance():
+    """Get performance metrics"""
+    if monitoring_system is None:
+        return jsonify({"error": "Monitoring system not initialized"}), 500
+    
+    try:
+        if hasattr(monitoring_system, 'performance_tracker'):
+            metrics = monitoring_system.performance_tracker.get_metrics()
+            return jsonify({
+                "fps": metrics['fps'],
+                "frame_time_ms": metrics['frame_time_ms'],
+                "detection_time_ms": metrics['detection_time_ms'],
+                "total_frames": metrics['total_frames'],
+                "total_detections": metrics['total_detections'],
+                "total_people": metrics['total_people'],
+                "elapsed_seconds": metrics['elapsed_seconds'],
+                "avg_people_per_detection": metrics['avg_people_per_detection']
+            })
+        else:
+            return jsonify({"error": "Performance tracker not available"}), 500
+    except Exception as e:
+        print(f"Error getting performance metrics: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint with GPU info"""

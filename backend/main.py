@@ -7,6 +7,7 @@ import threading
 from detector import PersonDetector
 from analysis import CrowdAnalyzer
 from pathlib import Path
+from fps_counter import PerformanceTracker
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -29,6 +30,7 @@ class CrowdMonitoringSystem:
         self.current_frame = None
         self.is_processing = False
         self.stop_reason = None
+        self.performance_tracker = PerformanceTracker()
     def _stop_processing(self, reason):
         self.stop_reason = reason
         self.running = False
@@ -136,6 +138,9 @@ class CrowdMonitoringSystem:
             
             try:
                 frame_count += 1
+                # Track frame processing time
+                self.performance_tracker.start_frame()
+                
                 # Resize frame for faster processing
                 frame = cv2.resize(frame, (640, 480))
                 
@@ -150,12 +155,21 @@ class CrowdMonitoringSystem:
                         frame_shape=frame.shape,
                     )
                     
-                    # Log every 30 frames (roughly every second at 30fps)
-                    if frame_count % 30 == 0:
-                        print(f"Frame {frame_count}: Detected {person_count} people", flush=True)
+                    # Get current FPS and frame time
+                    current_fps = self.performance_tracker.fps_counter.get_fps()
+                    frame_time_ms = self.performance_tracker.fps_counter.get_avg_frame_time_ms()
                     
-                    # Draw boxes on frame
-                    frame_with_boxes = self.detector.draw_boxes(frame, detection)
+                    # Log every 30 frames with performance metrics
+                    if frame_count % 30 == 0:
+                        print(f"Frame {frame_count}: {person_count} people | FPS: {current_fps:.1f} | Frame Time: {frame_time_ms:.1f}ms", flush=True)
+                    
+                    # Draw boxes and FPS on frame
+                    frame_with_boxes = self.detector.draw_boxes(
+                        frame, 
+                        detection, 
+                        fps=current_fps,
+                        frame_time_ms=frame_time_ms
+                    )
                     
                     self.current_frame = frame_with_boxes
 
@@ -165,6 +179,8 @@ class CrowdMonitoringSystem:
                 else:
                     self.current_frame = frame
                 
+                # Track end of frame for performance metrics
+                self.performance_tracker.end_frame(person_count=detection.get("count", 0))
                 self.is_processing = False
                 
             except Exception as e:
@@ -188,6 +204,11 @@ class CrowdMonitoringSystem:
         self.running = False
         if hasattr(self, 'thread'):
             self.thread.join(timeout=5)
+        
+        # Print performance summary
+        if hasattr(self, 'performance_tracker'):
+            self.performance_tracker.print_metrics()
+        
         print("Crowd monitoring system stopped")
     
     def get_current_status(self):

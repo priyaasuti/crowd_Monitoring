@@ -90,36 +90,94 @@ class PersonDetector:
                 "success": False,
             }
 
-    def draw_boxes(self, frame, detection_result):
+    def draw_boxes(self, frame, detection_result, fps=None, frame_time_ms=None):
         """
-        Draw bounding boxes on the frame
+        Draw bounding boxes and detection info on the frame
 
         Args:
             frame: Input video frame
             detection_result: Detection result from detect()
+            fps: Optional FPS value to display
+            frame_time_ms: Optional frame processing time in ms
 
         Returns:
-            Frame with drawn boxes
+            Frame with drawn boxes and metrics
         """
         frame_copy = frame.copy()
+        person_count = detection_result.get("count", 0)
 
+        # Draw each detection box
         for box, conf in zip(detection_result["boxes"], detection_result["confidences"]):
             x1, y1, x2, y2 = box
             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
 
-            # Draw box
-            cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            # Draw bounding box with thicker lines for better visibility
+            cv2.rectangle(frame_copy, (x1, y1), (x2, y2), (0, 255, 0), 3)
+            
+            # Draw filled rectangle for label background
+            label = f"Person {conf:.2f}"
+            text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+            cv2.rectangle(
+                frame_copy, 
+                (x1, y1 - text_size[1] - 8),
+                (x1 + text_size[0] + 4, y1),
+                (0, 255, 0),
+                -1  # Filled rectangle
+            )
 
-            # Draw confidence
-            label = f"Person: {conf:.2f}"
+            # Draw label text
             cv2.putText(
                 frame_copy,
                 label,
-                (x1, y1 - 10),
+                (x1 + 2, y1 - 4),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 0),
+                0.6,
+                (0, 0, 0),  # Black text on green background
                 2,
+                cv2.LINE_AA
             )
+
+        # Draw FPS if provided
+        if fps is not None:
+            fps_text = f"FPS: {fps:.1f}"
+            cv2.putText(
+                frame_copy,
+                fps_text,
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.2,
+                (0, 255, 0),
+                3,
+                cv2.LINE_AA
+            )
+        
+        # Draw frame time if provided
+        if frame_time_ms is not None:
+            time_text = f"Frame: {frame_time_ms:.1f}ms"
+            cv2.putText(
+                frame_copy,
+                time_text,
+                (10, 70),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (200, 200, 0),
+                2,
+                cv2.LINE_AA
+            )
+        
+        # Draw person count at top right
+        count_text = f"People Detected: {person_count}"
+        text_size = cv2.getTextSize(count_text, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)[0]
+        x_pos = frame.shape[1] - text_size[0] - 10
+        cv2.putText(
+            frame_copy,
+            count_text,
+            (x_pos, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 0, 255),
+            3,
+            cv2.LINE_AA
+        )
 
         return frame_copy
