@@ -59,7 +59,7 @@ export default function App() {
         icon: ShieldAlert,
         accent: 'from-amber-400 to-rose-500',
         description:
-          'Upload a video to run shared-feature accident and violence analysis with timestamped results.',
+          'Upload a video to run accident, violence, and weapon analysis with timestamped results.',
       },
     ],
     [],
@@ -299,7 +299,7 @@ export default function App() {
                   <p className="text-xs uppercase tracking-[0.3em] text-amber-100/70">Module 2</p>
                   <h2 className="mt-2 text-lg font-semibold text-white">Event Analysis Module</h2>
                   <p className="mt-2 text-sm leading-6 text-slate-300">
-                    Upload a video, run both event models, and review incident type, confidence, timestamp, and location.
+                    Upload a video, run accident, violence, and weapon models, then review incident type, confidence, timestamp, and location.
                   </p>
                 </div>
                 <ArrowRight className="mt-1 h-5 w-5 text-amber-100 transition-transform group-hover:translate-x-1" />

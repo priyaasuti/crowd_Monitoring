@@ -1,5 +1,5 @@
 """
-Event analysis pipeline for accident and violence video detection.
+Event analysis pipeline for accident, violence, and weapon video detection.
 """
 from __future__ import annotations
 
@@ -35,6 +35,10 @@ SEQUENCE_LENGTH = 20
 STEP_SIZE = 5
 ACCIDENT_THRESHOLD = 0.5
 VIOLENCE_THRESHOLD = 0.6
+WEAPON_CONFIDENCE_THRESHOLD = 0.3
+WEAPON_FRAME_SKIP = 2
+WEAPON_EDGE_MARGIN = 20
+WEAPON_CLASSES = {"weapon", "knife", "gun", "pistol", "rifle"}
 MIN_POSITIVE_VOTES = 2
 
 DEFAULT_SYSTEM_LOCATION = "Local monitoring workstation"
@@ -123,6 +127,38 @@ def get_event_models():
         "violence_model": violence_model,
         "accident_model": accident_model,
     }
+
+
+def _resolve_weapon_model_path() -> Path:
+    model_root = Path(__file__).resolve().parent / "models"
+    candidates = [
+        model_root / "weapons.pt",
+        model_root / "weapon.pt",
+        model_root / "weapon.pt" / "best.pt",
+        model_root / "weapon.pt" / "best",
+    ]
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    nested_weights = sorted(model_root.glob("**/best.pt"))
+    if nested_weights:
+        return nested_weights[0]
+
+    raise FileNotFoundError(
+        "Weapon model not found. Put weapons.pt or best.pt under backend/models."
+    )
+
+
+@lru_cache(maxsize=1)
+def get_weapon_model():
+    from ultralytics import YOLO
+
+    model_path = _resolve_weapon_model_path()
+    print(f"[WEAPON] Loading YOLO weapon model from {model_path}", flush=True)
+    model = YOLO(str(model_path), task="detect")
+    return model
 
 
 def _sample_frames(video_path: str, target_fps: int = FRAME_SAMPLE_FPS):
@@ -297,6 +333,176 @@ def _summarize_model_predictions(predictions: Sequence[SequencePrediction], thre
     }
 
 
+def _get_yolo_class_name(model, result, class_id: int) -> str:
+    names = getattr(result, "names", None) or getattr(model, "names", None)
+    if names is None and getattr(model, "model", None) is not None:
+        names = getattr(model.model, "names", None)
+
+    if isinstance(names, dict):
+        return str(names.get(class_id, class_id))
+    if isinstance(names, (list, tuple)) and class_id < len(names):
+        return str(names[class_id])
+    return "weapon"
+
+
+def _draw_weapon_detection(frame, detections):
+    annotated = frame.copy()
+    for detection in detections:
+        x1, y1, x2, y2 = detection["box"]
+        class_name = detection["class_name"]
+        confidence = detection["confidence"]
+        label = f"{class_name.upper()} {confidence:.2f}"
+        (label_width, label_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+
+        label_top = max(y1 - label_height - 10, 0)
+        cv2.rectangle(annotated, (x1, label_top), (x1 + label_width, y1), (0, 0, 255), -1)
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 4)
+        cv2.putText(
+            annotated,
+            label,
+            (x1, max(y1 - 5, label_height + 5)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (255, 255, 255),
+            2,
+        )
+
+    return annotated
+
+
+def _bgr_frame_to_base64(frame) -> str:
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    return _image_to_base64(Image.fromarray(rgb_frame))
+
+
+def _analyze_weapon_video(video_path: str):
+    model = get_weapon_model()
+    capture = cv2.VideoCapture(video_path)
+    if not capture.isOpened():
+        raise ValueError(f"Cannot open video source for weapon detection: {video_path}")
+
+    source_fps = capture.get(cv2.CAP_PROP_FPS) or 0
+    if source_fps <= 0:
+        source_fps = FRAME_SAMPLE_FPS
+
+    total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    frame_count = 0
+    best_frame = None
+    best_detection = None
+    best_confidence = 0.0
+    scanned_frames = 0
+
+    print(f"[WEAPON] Scanning video for weapons. total_frames={total_frames}", flush=True)
+
+    while capture.isOpened():
+        success, frame = capture.read()
+        if not success:
+            break
+
+        frame_count += 1
+        if frame_count % WEAPON_FRAME_SKIP != 0:
+            continue
+
+        scanned_frames += 1
+        height, width = frame.shape[:2]
+        results = model(frame, conf=WEAPON_CONFIDENCE_THRESHOLD, verbose=False)
+        if not results:
+            continue
+
+        result = results[0]
+        boxes = getattr(result, "boxes", None)
+        if boxes is None:
+            continue
+
+        for box in boxes:
+            class_id = int(box.cls[0])
+            confidence = float(box.conf[0])
+            class_name = _get_yolo_class_name(model, result, class_id)
+            normalized_class_name = class_name.lower().strip()
+
+            has_known_names = class_name != "weapon"
+            if has_known_names and normalized_class_name not in WEAPON_CLASSES:
+                continue
+
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            is_fully_visible = (
+                x1 > WEAPON_EDGE_MARGIN
+                and y1 > WEAPON_EDGE_MARGIN
+                and x2 < width - WEAPON_EDGE_MARGIN
+                and y2 < height - WEAPON_EDGE_MARGIN
+            )
+            if not is_fully_visible:
+                continue
+
+            if confidence > best_confidence:
+                best_confidence = confidence
+                best_frame = frame.copy()
+                best_detection = {
+                    "class_id": class_id,
+                    "class_name": class_name,
+                    "confidence": round(confidence, 4),
+                    "box": [x1, y1, x2, y2],
+                    "frame": frame_count,
+                    "timestamp": _format_timestamp(frame_count / float(source_fps)),
+                    "timestamp_seconds": round(frame_count / float(source_fps), 2),
+                    "fully_visible": True,
+                }
+                print(
+                    f"[WEAPON] Better detection at frame {frame_count}: "
+                    f"{class_name} confidence={confidence:.2f}",
+                    flush=True,
+                )
+
+    capture.release()
+
+    if not best_detection or best_frame is None:
+        return {
+            "detected": False,
+            "confidence": 0.0,
+            "timestamp": None,
+            "timestamp_seconds": None,
+            "label": "weapon",
+            "class_name": None,
+            "box": None,
+            "frame": None,
+            "scanned_frames": scanned_frames,
+            "threshold": WEAPON_CONFIDENCE_THRESHOLD,
+            "scene_frame": None,
+        }
+
+    annotated_frame = _draw_weapon_detection(best_frame, [best_detection])
+    return {
+        "detected": True,
+        "confidence": best_detection["confidence"],
+        "timestamp": best_detection["timestamp"],
+        "timestamp_seconds": best_detection["timestamp_seconds"],
+        "label": "weapon",
+        "class_name": best_detection["class_name"],
+        "box": best_detection["box"],
+        "frame": best_detection["frame"],
+        "scanned_frames": scanned_frames,
+        "threshold": WEAPON_CONFIDENCE_THRESHOLD,
+        "scene_frame": _bgr_frame_to_base64(annotated_frame),
+    }
+
+
+def _weapon_error_summary(error: Exception):
+    return {
+        "detected": False,
+        "confidence": 0.0,
+        "timestamp": None,
+        "timestamp_seconds": None,
+        "label": "weapon",
+        "class_name": None,
+        "box": None,
+        "frame": None,
+        "scanned_frames": 0,
+        "threshold": WEAPON_CONFIDENCE_THRESHOLD,
+        "scene_frame": None,
+        "error": str(error),
+    }
+
+
 def generate_scene_description(
     image: Image.Image,
     incident_type: str,
@@ -404,11 +610,17 @@ def _analyze_event_video_core(video_path: str, system_location: str | None = Non
     if not sequences:
         raise ValueError("Not enough frames were available to build analysis sequences")
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         violence_future = executor.submit(_score_model, violence_model, sequences, sequence_metadata, VIOLENCE_THRESHOLD)
         accident_future = executor.submit(_score_model, accident_model, sequences, sequence_metadata, ACCIDENT_THRESHOLD)
+        weapon_future = executor.submit(_analyze_weapon_video, video_path)
         violence_predictions = violence_future.result()
         accident_predictions = accident_future.result()
+        try:
+            weapon_summary = weapon_future.result()
+        except Exception as e:
+            print(f"[WEAPON] Detection unavailable: {e}", flush=True)
+            weapon_summary = _weapon_error_summary(e)
 
     violence_summary = _summarize_model_predictions(violence_predictions, VIOLENCE_THRESHOLD, "violence")
     accident_summary = _summarize_model_predictions(accident_predictions, ACCIDENT_THRESHOLD, "accident")
@@ -416,6 +628,7 @@ def _analyze_event_video_core(video_path: str, system_location: str | None = Non
     overall_candidates = [
         ("violence", violence_summary),
         ("accident", accident_summary),
+        ("weapon", weapon_summary),
     ]
     positive_candidates = [candidate for candidate in overall_candidates if candidate[1]["detected"]]
 
@@ -424,16 +637,28 @@ def _analyze_event_video_core(video_path: str, system_location: str | None = Non
         overall_incident = incident_type.capitalize()
         overall_confidence = incident_summary["confidence"]
         overall_timestamp = incident_summary["timestamp"]
-        selected_sequence = incident_summary["best_sequence"]
-        sequence_start = selected_sequence["sequence_index"] * STEP_SIZE
-        frame_index = min(sequence_start + SEQUENCE_LENGTH // 2, len(frames) - 1)
-        scene_frame_image = frames[frame_index]
-        scene_frame_base64 = _image_to_base64(scene_frame_image)
+        if incident_type == "weapon":
+            scene_frame_base64 = weapon_summary.get("scene_frame")
+            if scene_frame_base64:
+                scene_image_data = base64.b64decode(scene_frame_base64)
+                scene_frame_image = Image.open(io.BytesIO(scene_image_data)).convert("RGB")
+            else:
+                scene_frame_image = None
+        else:
+            selected_sequence = incident_summary["best_sequence"]
+            sequence_start = selected_sequence["sequence_index"] * STEP_SIZE
+            frame_index = min(sequence_start + SEQUENCE_LENGTH // 2, len(frames) - 1)
+            scene_frame_image = frames[frame_index]
+            scene_frame_base64 = _image_to_base64(scene_frame_image)
         scene_description = None
     else:
         overall_incident = "No Incident"
-        overall_confidence = max(violence_summary["confidence"], accident_summary["confidence"])
-        overall_timestamp = violence_summary["timestamp"] or accident_summary["timestamp"]
+        overall_confidence = max(
+            violence_summary["confidence"],
+            accident_summary["confidence"],
+            weapon_summary["confidence"],
+        )
+        overall_timestamp = violence_summary["timestamp"] or accident_summary["timestamp"] or weapon_summary["timestamp"]
         scene_description = None
         scene_frame_base64 = None
         scene_frame_image = None
@@ -471,11 +696,17 @@ def _analyze_event_video_core(video_path: str, system_location: str | None = Non
                 **accident_summary,
                 "threshold": ACCIDENT_THRESHOLD,
             },
+            "weapon": {
+                **weapon_summary,
+                "threshold": WEAPON_CONFIDENCE_THRESHOLD,
+            },
         },
         "summary": {
             "violence_detected": violence_summary["detected"],
             "accident_detected": accident_summary["detected"],
-            "feature_extraction": "Shared MobileNetV2 features reused for both models.",
+            "weapon_detected": weapon_summary["detected"],
+            "feature_extraction": "Shared MobileNetV2 features reused for accident and violence models.",
+            "weapon_detection": "YOLO weapon model scans alternate frames and selects the best fully visible detection.",
             "parallel_inference": True,
         },
     }

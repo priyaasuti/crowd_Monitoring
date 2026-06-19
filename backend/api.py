@@ -362,7 +362,7 @@ def caption_image():
 
 @app.route('/analyze-event-video', methods=['POST'])
 def analyze_event_video_upload():
-    """Analyze an uploaded video for violence and accident detection."""
+    """Analyze an uploaded video for violence, accident, and weapon detection."""
     if 'file' not in request.files:
         return jsonify({"error": "No file provided"}), 400
 
@@ -388,7 +388,7 @@ def analyze_event_video_upload():
         
         print(f"[API] Analysis result: incident_type={analysis_result.get('incident_type')}, confidence={analysis_result.get('confidence_score')}", flush=True)
 
-        if analysis_result.get('incident_type') in ['Violence', 'Accident']:
+        if analysis_result.get('incident_type') in ['Violence', 'Accident', 'Weapon']:
             confidence = analysis_result.get('confidence_score', 0)
             scene_desc = analysis_result.get('scene_description', '')
             print(f"[API] Triggering alert for {analysis_result['incident_type']} (confidence: {confidence})", flush=True)

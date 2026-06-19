@@ -1,5 +1,5 @@
 """
-Twilio-based alerts for violence and accident detection.
+Twilio-based alerts for violence, accident, and weapon detection.
 Sends a voice call when an incident is confirmed.
 """
 
@@ -32,7 +32,7 @@ def build_alert_message(incident_type: str, location: str, confidence: float) ->
     Build a TwiML XML voice message for the alert.
 
     Args:
-        incident_type: "Violence" or "Accident"
+        incident_type: "Violence", "Accident", or "Weapon"
         location: System location string
         confidence: Detection confidence score (0-1)
 
@@ -64,7 +64,7 @@ def send_alert_call(incident_type: str, location: str, confidence: float) -> boo
     Send a voice call alert for a detected incident.
 
     Args:
-        incident_type: "Violence" or "Accident"
+        incident_type: "Violence", "Accident", or "Weapon"
         location: System location
         confidence: Detection confidence (0-1)
 
@@ -100,7 +100,7 @@ def send_alert_sms(incident_type: str, location: str, confidence: float, scene_d
     Send an SMS alert with incident details and scene description.
 
     Args:
-        incident_type: "Violence" or "Accident"
+        incident_type: "Violence", "Accident", or "Weapon"
         location: System location
         confidence: Detection confidence (0-1)
         scene_description: Detailed scene analysis
@@ -154,7 +154,7 @@ def trigger_alert(incident_type: str, location: str, confidence: float, scene_de
     Trigger an alert for a detected incident (voice call + SMS).
 
     Args:
-        incident_type: "Violence" or "Accident"
+        incident_type: "Violence", "Accident", or "Weapon"
         location: System location
         confidence: Detection confidence (0-1)
         scene_description: Detailed scene analysis text
@@ -162,7 +162,7 @@ def trigger_alert(incident_type: str, location: str, confidence: float, scene_de
     Returns:
         dict with alert status
     """
-    if incident_type not in ["Violence", "Accident"]:
+    if incident_type not in ["Violence", "Accident", "Weapon"]:
         return {"status": "invalid_incident_type"}
 
     if confidence < 0.5:

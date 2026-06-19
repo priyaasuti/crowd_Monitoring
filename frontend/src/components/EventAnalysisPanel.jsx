@@ -29,8 +29,14 @@ const modelCards = [
     accent: 'from-rose-400/20 to-red-500/10',
   },
   {
+    title: 'Weapon detection',
+    description: 'Scans alternate frames with the YOLO weapon model and captures the best visible detection.',
+    icon: ShieldAlert,
+    accent: 'from-red-400/20 to-amber-500/10',
+  },
+  {
     title: 'Shared features',
-    description: 'Frames are sampled once, encoded once, and reused for both models.',
+    description: 'Frames are sampled once, encoded once, and reused for the accident and violence models.',
     icon: Waves,
     accent: 'from-cyan-400/20 to-blue-500/10',
   },
@@ -151,6 +157,7 @@ export const EventAnalysisPanel = () => {
   const video = result.video || {}
   const violence = result.models?.violence || {}
   const accident = result.models?.accident || {}
+  const weapon = result.models?.weapon || {}
 
   return (
     <div className="space-y-6">
@@ -164,6 +171,9 @@ export const EventAnalysisPanel = () => {
             <h3 className="mt-3 text-2xl font-semibold tracking-tight text-white">
               Upload video and detect incidents
             </h3>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+              Runs accident, violence, and weapon detection on the uploaded footage.
+            </p>
           </div>
 
           <button
@@ -276,7 +286,7 @@ export const EventAnalysisPanel = () => {
             {video.camera_captured ? 'Camera source confirmed' : 'Uploaded video processed'}
           </div>
 
-          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Violence model</p>
               <p className="mt-2 text-lg font-semibold text-white">{violence.detected ? 'Violence detected' : 'No violence detected'}</p>
@@ -288,6 +298,13 @@ export const EventAnalysisPanel = () => {
               <p className="mt-2 text-lg font-semibold text-white">{accident.detected ? 'Accident detected' : 'No accident detected'}</p>
               <p className="mt-1 text-sm text-slate-300">Confidence: {formatPercent(accident.confidence)}</p>
               <p className="mt-1 text-sm text-slate-300">Timestamp: {accident.timestamp || '--:--'}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Weapon model</p>
+              <p className="mt-2 text-lg font-semibold text-white">{weapon.detected ? `${weapon.class_name || 'Weapon'} detected` : 'No weapon detected'}</p>
+              <p className="mt-1 text-sm text-slate-300">Confidence: {formatPercent(weapon.confidence)}</p>
+              <p className="mt-1 text-sm text-slate-300">Timestamp: {weapon.timestamp || '--:--'}</p>
+              {weapon.error && <p className="mt-2 text-xs text-amber-200">Model unavailable: {weapon.error}</p>}
             </div>
           </div>
 
