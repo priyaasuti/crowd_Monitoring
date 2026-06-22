@@ -44,7 +44,8 @@ MIN_POSITIVE_VOTES = 2
 DEFAULT_SYSTEM_LOCATION = "Local monitoring workstation"
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  # Google AI Studio API key from .env
 GOOGLE_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
-GOOGLE_MODEL = "gemini-flash-latest"  # Google's fastest model
+GOOGLE_MODEL = "gemini-flash-latest"
+
 
 # Debug: Print Google API status on startup
 print(f"[EVENT_ANALYSIS] Google API Key loaded: {bool(GOOGLE_API_KEY)}", flush=True)
@@ -139,10 +140,10 @@ def _resolve_weapon_model_path() -> Path:
     ]
 
     for candidate in candidates:
-        if candidate.exists():
+        if candidate.is_file():
             return candidate
 
-    nested_weights = sorted(model_root.glob("**/best.pt"))
+    nested_weights = sorted([p for p in model_root.glob("**/best.pt") if p.is_file()])
     if nested_weights:
         return nested_weights[0]
 
@@ -507,85 +508,90 @@ def generate_scene_description(
     image: Image.Image,
     incident_type: str,
 ) -> str:
-    """Generate scene description using Google Gemini API"""
-    
+    """Generate scene description using Google Gemini Vision API (multimodal)."""
+
     if not get_google_client():
         return f"Incident Type: {incident_type}. Scene description unavailable (API not configured)."
-    
+
     try:
-        # Create detailed prompt - simple and clear
+        # Encode the scene image as base64 JPEG for Gemini Vision
+        img_buffer = io.BytesIO()
+        image.save(img_buffer, format="JPEG", quality=85)
+        img_b64 = base64.b64encode(img_buffer.getvalue()).decode("utf-8")
+
         prompt = f"""INCIDENT ALERT: {incident_type.upper()} DETECTED
 
-Describe the scene in simple, clear language that anyone can understand:
+You are a security AI. Look at this surveillance frame and describe what you see:
 
-WHERE - What type of location is this? (street, store, office, etc.)
-WHO - How many people are there? Where are they?
-WHAT - What are they doing? What's happening?
-DANGER - What is dangerous or concerning about this?
-DETAILS - Lighting? Crowded? Any exits visible?
-ACTION - Is this Low/Medium/High risk? What should security do?
+WHERE - What type of location is this? (street, store, office, parking lot, etc.)
+WHO - How many people are visible? Where are they positioned?
+WHAT - What are they doing? What exactly is happening?
+DANGER - What makes this dangerous or concerning?
+DETAILS - Lighting conditions? Crowded or sparse? Any visible exits or weapons?
+ACTION - Risk level (Low/Medium/High)? What should security do immediately?
 
-Keep it SHORT and SIMPLE - 1-2 sentences each. No technical jargon."""
-        
-        # Call Google Gemini API with correct format
-        url = f"{GOOGLE_API_URL}?key={GOOGLE_API_KEY}"
-        
+Keep each answer to 1-2 short sentences. Be direct and factual."""
+
+        url = GOOGLE_API_URL
         headers = {
             "Content-Type": "application/json",
+            "X-goog-api-key": GOOGLE_API_KEY,
         }
-        
+
+        # Multimodal payload: image + text sent together to Gemini Vision
         payload = {
             "contents": [
                 {
                     "parts": [
                         {
+                            "inline_data": {
+                                "mime_type": "image/jpeg",
+                                "data": img_b64,
+                            }
+                        },
+                        {
                             "text": prompt,
-                        }
+                        },
                     ]
                 }
             ]
         }
-        
-        print(f"[GEMINI] Requesting scene description for {incident_type}...", flush=True)
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
-        
-        # Debug: Print response for errors
+
+        print(f"[GEMINI] Sending scene image + prompt for {incident_type} analysis...", flush=True)
+        response = requests.post(url, headers=headers, json=payload, timeout=45)
+
         if response.status_code != 200:
             print(f"[GEMINI] Status: {response.status_code}", flush=True)
-            print(f"[GEMINI] Response: {response.text[:300]}", flush=True)
-        
+            print(f"[GEMINI] Response: {response.text[:400]}", flush=True)
+
         response.raise_for_status()
-        
         result = response.json()
-        
-        # Extract text from Google Gemini response
+
         if "candidates" in result and len(result["candidates"]) > 0:
             candidate = result["candidates"][0]
             if "content" in candidate and "parts" in candidate["content"]:
                 if len(candidate["content"]["parts"]) > 0:
                     description = candidate["content"]["parts"][0].get("text", "").strip()
                     if description:
-                        print("[GEMINI] Scene description generated successfully", flush=True)
+                        print("[GEMINI] Scene description generated successfully (vision)", flush=True)
                         return description
-        
-        print(f"[GEMINI] Response format: {list(result.keys())}", flush=True)
+
+        print(f"[GEMINI] Unexpected response format: {list(result.keys())}", flush=True)
         return f"Scene analysis for {incident_type} incident completed."
-            
+
     except requests.exceptions.Timeout:
-        print("[GEMINI] API request timed out (>30s)", flush=True)
-        return f"Scene description generation timed out."
+        print("[GEMINI] API request timed out (>45s)", flush=True)
+        return "Scene description generation timed out."
     except requests.exceptions.HTTPError as e:
-        error_msg = str(e)
-        print(f"[GEMINI] HTTP Error: {error_msg[:150]}", flush=True)
+        print(f"[GEMINI] HTTP Error: {str(e)[:150]}", flush=True)
         try:
-            error_detail = response.text
-            print(f"[GEMINI] Error detail: {error_detail[:200]}", flush=True)
-        except:
+            print(f"[GEMINI] Error detail: {response.text[:300]}", flush=True)
+        except Exception:
             pass
         return f"Scene description error for {incident_type}: API error"
     except requests.exceptions.RequestException as e:
         print(f"[GEMINI] Request failed: {str(e)[:150]}", flush=True)
-        return f"Failed to generate description: connection error"
+        return "Failed to generate description: connection error"
     except Exception as e:
         print(f"[GEMINI] Unexpected error: {str(e)[:150]}", flush=True)
         return f"Scene description unavailable: {str(e)[:60]}"
@@ -625,6 +631,79 @@ def _analyze_event_video_core(video_path: str, system_location: str | None = Non
     violence_summary = _summarize_model_predictions(violence_predictions, VIOLENCE_THRESHOLD, "violence")
     accident_summary = _summarize_model_predictions(accident_predictions, ACCIDENT_THRESHOLD, "accident")
 
+    # Tracking, Aggressor & Severity analysis for violence
+    aggressor_id = None
+    severity_info = {
+        "score": 0,
+        "risk_level": "Low Risk",
+        "details": None
+    }
+    scene_frame_base64 = None
+    scene_frame_image = None
+
+    if violence_summary["detected"]:
+        try:
+            from yolo_detector import YOLODetector
+            from tracker import Tracker
+            from aggressor_detector import find_aggressor
+            from severity import calculate_severity
+            
+            yolo_det = YOLODetector()
+            tracker = Tracker()
+            
+            selected_sequence = violence_summary["best_sequence"]
+            sequence_start = selected_sequence["sequence_index"] * STEP_SIZE
+            sequence_end = sequence_start + SEQUENCE_LENGTH
+            
+            seq_frames = frames[sequence_start:min(sequence_end, len(frames))]
+            tracked_history = []
+            
+            for sf_idx, f_img in enumerate(seq_frames):
+                cv_frame = cv2.cvtColor(np.array(f_img), cv2.COLOR_RGB2BGR)
+                dets = yolo_det.detect(cv_frame)
+                tracked_objs = tracker.track(dets)
+                tracked_history.append((cv_frame, tracked_objs))
+                
+            # Use midpoint frame for the main incident representation
+            mid_idx = len(seq_frames) // 2
+            mid_frame_cv, mid_tracked = tracked_history[mid_idx]
+            
+            # Find aggressor and calculate severity
+            aggressor_id = find_aggressor(mid_tracked)
+            severity_info = calculate_severity(mid_tracked, violence_duration_frames=len(seq_frames), fps=source_fps)
+            
+            # Draw tracking annotations on the midpoint frame
+            annotated_frame = mid_frame_cv.copy()
+            for obj in mid_tracked:
+                o_id = obj["id"]
+                x1, y1, x2, y2 = map(int, obj["box"])
+                
+                if aggressor_id is not None and o_id == aggressor_id:
+                    color = (0, 0, 255) # Red for Aggressor
+                    thickness = 3
+                    label = f"AGGRESSOR ID {o_id} ({severity_info['risk_level']})"
+                else:
+                    color = (0, 255, 0) # Green for others
+                    thickness = 2
+                    label = f"Person ID {o_id}"
+                    
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, thickness)
+                cv2.putText(annotated_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                
+            annotated_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+            scene_frame_image = Image.fromarray(annotated_rgb)
+            scene_frame_base64 = _image_to_base64(scene_frame_image)
+            
+            # Save tracking metrics to violence summary
+            violence_summary["aggressor_id"] = aggressor_id
+            violence_summary["severity_score"] = severity_info["score"]
+            violence_summary["risk_level"] = severity_info["risk_level"]
+            violence_summary["details"] = severity_info["details"]
+            
+        except Exception as track_err:
+            print(f"[TRACKING] Error during violence tracking: {track_err}", flush=True)
+            violence_summary["tracking_error"] = str(track_err)
+
     overall_candidates = [
         ("violence", violence_summary),
         ("accident", accident_summary),
@@ -644,6 +723,9 @@ def _analyze_event_video_core(video_path: str, system_location: str | None = Non
                 scene_frame_image = Image.open(io.BytesIO(scene_image_data)).convert("RGB")
             else:
                 scene_frame_image = None
+        elif incident_type == "violence" and violence_summary["detected"] and scene_frame_base64 is not None:
+            # Midpoint frame is already annotated and stored in scene_frame_base64!
+            pass
         else:
             selected_sequence = incident_summary["best_sequence"]
             sequence_start = selected_sequence["sequence_index"] * STEP_SIZE

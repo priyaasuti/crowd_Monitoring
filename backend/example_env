@@ -1,0 +1,31 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Crowd Monitoring – Environment Variables
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Google Gemini API key (used for scene description generation)
+# Get yours at: https://aistudio.google.com/app/apikey
+GOOGLE_API_KEY=
+
+# imgbb API key — used to upload the scene image so Twilio can send it as MMS
+# Free, no credit card: https://api.imgbb.com/  →  click "Get API Key"
+IMGBB_API_KEY=
+
+# ─── Twilio (SMS + Voice Calls) ──────────────────────────────────────────────
+# Sign up at https://www.twilio.com/try-twilio (free trial gives ~$15 credit)
+# Find these on your Twilio Console Dashboard: https://console.twilio.com/
+
+# Your Twilio Account SID (starts with AC...)
+TWILIO_ACCOUNT_SID=
+
+# Your Twilio Auth Token (found below Account SID on dashboard)
+TWILIO_AUTH_TOKEN=
+
+# The Twilio phone number you bought (format: +1XXXXXXXXXX)
+TWILIO_FROM_NUMBER=
+
+# Your personal phone number to receive alerts (format: +91XXXXXXXXXX for India)
+TWILIO_TO_NUMBER=
+
+# ─── Optional ─────────────────────────────────────────────────────────────────
+# Custom location label shown in alerts (leave blank to use hostname)
+SYSTEM_LOCATION=Security Monitoring Station

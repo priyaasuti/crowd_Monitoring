@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Camera, Clock3, FileVideo2, MapPin, ScanFace, ShieldAlert, Siren, Upload, Waves } from 'lucide-react'
 
 const API_BASE_URL = 'http://localhost:5000'
@@ -281,6 +281,44 @@ export const EventAnalysisPanel = () => {
               <p className="mt-2 text-sm text-white">{result.analysis_timestamp || '--'}</p>
             </div>
           </div>
+
+          {violence.detected && (
+            <div className="mt-4 rounded-2xl border border-red-500/25 bg-gradient-to-br from-red-950/20 via-slate-950 to-red-950/15 p-4 shadow-lg shadow-red-950/10">
+              <div className="flex items-center gap-2 mb-3">
+                <ShieldAlert className="h-4.5 w-4.5 text-red-400" />
+                <h4 className="text-xs font-semibold tracking-wide text-white uppercase">Violence Tracking & Severity Analysis</h4>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-red-500/10 bg-white/5 p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-400">Identified Aggressor</p>
+                  <p className="mt-1 text-base font-bold text-red-400">
+                    {violence.aggressor_id !== null && violence.aggressor_id !== undefined ? `Person ID ${violence.aggressor_id}` : 'None Identified'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-red-500/10 bg-white/5 p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-400">Severity Score</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="text-base font-bold text-white">{violence.severity_score || 0}/100</p>
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      violence.risk_level === 'High Risk' ? 'bg-red-400/10 text-red-400 border border-red-400/25' :
+                      violence.risk_level === 'Medium Risk' ? 'bg-amber-400/10 text-amber-400 border border-amber-400/25' :
+                      'bg-emerald-400/10 text-emerald-400 border border-emerald-400/25'
+                    }`}>
+                      {violence.risk_level || 'Low Risk'}
+                    </span>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-red-500/10 bg-white/5 p-3">
+                  <p className="text-[10px] uppercase tracking-wider text-slate-400">Conflict Details</p>
+                  <div className="mt-1 space-y-0.5 text-xs text-slate-300">
+                    <p>People: <span className="font-semibold text-white">{violence.details?.people_count || 0}</span></p>
+                    <p>Duration: <span className="font-semibold text-white">{violence.details?.duration_seconds || 0}s</span></p>
+                    <p>Speed: <span className="font-semibold text-white">{violence.details?.avg_speed || 0} px/f</span></p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/8 p-4 text-sm text-cyan-50/90">
             {video.camera_captured ? 'Camera source confirmed' : 'Uploaded video processed'}

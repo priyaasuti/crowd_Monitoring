@@ -391,12 +391,14 @@ def analyze_event_video_upload():
         if analysis_result.get('incident_type') in ['Violence', 'Accident', 'Weapon']:
             confidence = analysis_result.get('confidence_score', 0)
             scene_desc = analysis_result.get('scene_description', '')
+            scene_frame_b64 = analysis_result.get('scene_frame', '')
             print(f"[API] Triggering alert for {analysis_result['incident_type']} (confidence: {confidence})", flush=True)
             alert_result = trigger_alert(
                 incident_type=analysis_result['incident_type'],
                 location=system_location,
                 confidence=confidence,
-                scene_description=scene_desc
+                scene_description=scene_desc,
+                scene_frame_base64=scene_frame_b64,
             )
             print(f"[API] Alert result: {alert_result}", flush=True)
 
