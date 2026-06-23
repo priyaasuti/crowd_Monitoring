@@ -35,6 +35,7 @@ SEQUENCE_LENGTH = 20
 STEP_SIZE = 5
 ACCIDENT_THRESHOLD = 0.5
 VIOLENCE_THRESHOLD = 0.6
+WEAPON_THRESHOLD = 0.6
 MIN_POSITIVE_VOTES = 2
 
 DEFAULT_SYSTEM_LOCATION = "Local monitoring workstation"
@@ -112,8 +113,8 @@ def get_event_models():
     violence_model = LSTMModel().to(device)
     accident_model = LSTMModel().to(device)
 
-    violence_model.load_state_dict(torch.load(violence_path, map_location=device))
-    accident_model.load_state_dict(torch.load(accident_path, map_location=device))
+    violence_model.load_state_dict(torch.load(violence_path, map_location=device, weights_only=False))
+    accident_model.load_state_dict(torch.load(accident_path, map_location=device, weights_only=False))
 
     violence_model.eval()
     accident_model.eval()
@@ -475,7 +476,7 @@ def _analyze_event_video_core(video_path: str, system_location: str | None = Non
         "summary": {
             "violence_detected": violence_summary["detected"],
             "accident_detected": accident_summary["detected"],
-            "feature_extraction": "Shared MobileNetV2 features reused for both models.",
+            "feature_extraction": "Shared MobileNetV2 features reused for all models (GPU-accelerated).",
             "parallel_inference": True,
         },
     }

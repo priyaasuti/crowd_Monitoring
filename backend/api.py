@@ -1,6 +1,7 @@
 """
 Flask API server for crowd monitoring
 """
+from datetime import datetime
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import base64
@@ -17,6 +18,7 @@ import threading
 from uuid import uuid4
 from werkzeug.utils import secure_filename
 from event_analysis import _analyze_event_video_core, generate_scene_description
+from weapon_detector import WeaponDetector
 from notifier import trigger_alert
 
 app = Flask(__name__)
@@ -41,6 +43,7 @@ last_alert_logged = False
 analysis_jobs = {}
 analysis_jobs_lock = threading.Lock()
 analysis_scene_executor = ThreadPoolExecutor(max_workers=1)
+weapon_detector = None  # Lazy loaded
 
 
 def _set_analysis_job(job_id, **updates):
@@ -62,6 +65,14 @@ def _generate_scene_description_async(job_id, scene_frame, incident_type):
         _set_analysis_job(job_id, scene_status="ready", scene_description=description, error=None)
     except Exception as e:
         _set_analysis_job(job_id, scene_status="error", scene_description=None, error=str(e))
+
+@lru_cache(maxsize=1)
+def get_weapon_detector():
+    """Get or initialize weapon detector (lazy load)"""
+    global weapon_detector
+    if weapon_detector is None:
+        weapon_detector = WeaponDetector(confidence_threshold=0.5)
+    return weapon_detector
 
 def allowed_file(filename):
     """Check if file extension is allowed"""
@@ -296,11 +307,25 @@ def health():
         "cuda_version": torch.version.cuda if torch.cuda.is_available() else "N/A",
     }
     
+    try:
+        detector = get_weapon_detector()
+        weapon_detector_status = {
+            "loaded": True,
+            "device": str(detector.device),
+            "confidence_threshold": detector.confidence_threshold
+        }
+    except Exception as e:
+        weapon_detector_status = {
+            "loaded": False,
+            "error": str(e)
+        }
+    
     return jsonify({
         "status": "healthy",
         "monitoring_active": monitoring_system is not None,
         "gpu_info": device_info,
-        "note": "GPU acceleration enabled through YOLO framework on Jetson"
+        "weapon_detector": weapon_detector_status,
+        "note": "GPU acceleration enabled for YOLO, LSTM models, and feature extraction on Jetson"
     })
 
 
@@ -485,6 +510,106 @@ def get_analysis_job(job_id):
         "error": job.get("error"),
         "incident_type": job.get("incident_type"),
     })
+
+
+@app.route('/detect-weapon', methods=['POST'])
+def detect_weapon():
+    """Detect weapons in uploaded video"""
+    if 'file' not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({
+            "error": f"File type not allowed. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+        }), 400
+
+    try:
+        filename = secure_filename(file.filename)
+        import time
+        filename = f"{int(time.time())}_weapon_{filename}"
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+
+        print(f"Analyzing video for weapons: {filepath}", flush=True)
+        
+        detector = get_weapon_detector()
+        
+        # Sample frames from video
+        from event_analysis import _sample_frames, _extract_features, _build_sequences
+        frames, sampled_frame_indices, source_fps, duration_seconds, total_frame_count = _sample_frames(filepath)
+        
+        print(f"Sampled {len(frames)} frames from {total_frame_count} total frames", flush=True)
+        
+        # Extract features
+        features = _extract_features(frames)
+        print(f"Extracted features: shape={features.shape}", flush=True)
+        
+        # Build sequences
+        sequences, sequence_metadata = _build_sequences(features, sampled_frame_indices, source_fps)
+        print(f"Built {len(sequences)} sequences", flush=True)
+        
+        # Run weapon detection on all sequences
+        weapon_detections = []
+        for seq_idx, sequence in enumerate(sequences):
+            detection = detector.detect_weapon_in_sequence([sequence])
+            weapon_detections.append({
+                "sequence_index": seq_idx,
+                "timestamp": sequence_metadata[seq_idx].get("midpoint_seconds", 0),
+                **detection
+            })
+        
+        # Aggregate results
+        detected_sequences = [d for d in weapon_detections if d["detected"]]
+        max_confidence = max([d["confidence"] for d in weapon_detections], default=0)
+        overall_detected = len(detected_sequences) > 0
+        
+        system_location = request.form.get('system_location') or get_system_location()
+        
+        print(f"Weapon detection complete: detected={overall_detected}, confidence={max_confidence:.3f}", flush=True)
+        
+        if overall_detected:
+            detector_obj = get_weapon_detector()
+            threat_level = detector_obj.detect_weapon_in_sequence([sequences[detected_sequences[0]["sequence_index"]]])["threat_level"]
+            alert_result = trigger_alert(
+                incident_type="Weapon Detected",
+                location=system_location,
+                confidence=max_confidence,
+                scene_description=f"Weapon detected with {threat_level} threat level"
+            )
+            print(f"Weapon alert triggered: {alert_result}", flush=True)
+        
+        return jsonify({
+            "message": "Weapon detection analysis completed",
+            "filename": filename,
+            "filepath": filepath,
+            "weapon_detected": overall_detected,
+            "detection_confidence": round(max_confidence, 4),
+            "threat_level": "HIGH" if max_confidence > 0.7 else ("MEDIUM" if max_confidence > 0.3 else "LOW"),
+            "detected_sequences": len(detected_sequences),
+            "total_sequences": len(sequences),
+            "video": {
+                "path": filepath,
+                "source_fps": round(source_fps, 2),
+                "duration_seconds": round(duration_seconds, 2),
+                "frame_count": total_frame_count,
+                "sampled_frames": len(frames),
+            },
+            "system_location": system_location,
+            "analysis_timestamp": datetime.now().isoformat(timespec="seconds"),
+            "sequence_details": weapon_detections[:10]  # Return first 10 sequences
+        }), 200
+        
+    except Exception as e:
+        print(f"Error detecting weapon: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "error": f"Failed to detect weapon: {str(e)}"
+        }), 500
 
 
 @app.route('/switch-source', methods=['POST'])
